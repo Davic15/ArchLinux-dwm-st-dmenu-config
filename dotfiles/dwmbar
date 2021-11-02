@@ -1,0 +1,113 @@
+#!/bin/bash
+# Network speed stuff stolen from http://linuxclues.blogspot.sg/2009/11/shell-script-show-network-speed.html
+
+print_wifi() {
+	ip=$(ip route get 8.8.8.8 2>/dev/null|grep -Eo 'src [0-9.]+'|grep -Eo '[0-9.]+')
+	if=wlan0
+		while IFS=$': \t' read -r label value
+		do
+			case $label in SSID) SSID=$value
+				;;
+			signal) SIGNAL=$value
+				;;
+		esac
+	done < <(iw "$if" link)
+	echo -e "$ip"
+}
+
+print_backlight() {
+    #printf "%s☀ %.0f%s\n" "$SEP1" "$(xbacklight)" "$SEP2"
+    printf "%sBright: %.0f%s\n" "$SEP1" "$(enlighten)" "$SEP2"
+}
+
+print_mem() {
+	echo $(free -h --kilo | awk '/^Mem:/ {print $3 "/" $2}')
+}
+
+print_home() {
+	echo $(df -Ph | grep "/dev/sdb2" | awk {'print $4'})
+}
+
+print_root(){
+	echo $(df -Ph | grep "/dev/sda2" | awk {'print $4'})
+}
+
+print_network(){
+	logfile=/dev/shm/netlog
+	[ -f "$logfile" ] || echo "0 0" > "$logfile"
+	read -r rxprev txprev < "$logfile"
+	rxcurrent="$(($(paste -d '+' /sys/class/net/[ew]*/statistics/rx_bytes)))"
+	txcurrent="$(($(paste -d '+' /sys/class/net/[ew]*/statistics/tx_bytes)))"
+	echo "$(bc <<< "scale=2; ($rxcurrent-$rxprev) / 10^6")" "$(bc <<< "scale=2; ($txcurrent-$txprev) / 10^6")"
+	echo "$rxcurrent $txcurrent" > "$logfile"
+}
+
+print_temp(){
+	test -f /sys/class/thermal/thermal_zone0/temp || return 0
+	echo $(head -c 2 /sys/class/thermal/thermal_zone0/temp)C
+}
+
+print_bat(){
+	hash acpi || return 0
+	onl="$(grep "on-line" <(acpi -V))"
+	charge="$(awk '{ sum += $1 } END { print sum }' /sys/class/power_supply/BAT*/capacity)"
+	if test -z "$onl"
+	then
+		echo -e "${charge}"
+        #notify-send "Battery low. Battery level is ${charge}%!"
+	else
+		echo -e "${charge}%"
+	fi
+}
+
+print_date(){
+	echo $(date "+%a %d-%m-%y %T")
+}
+
+print_pulse () {
+    VOL=$(pamixer --get-volume-human | tr -d '%')
+    
+    printf "%s" "$SEP1"
+        if [ "$VOL" = "muted" ] || [ "$VOL" -eq 0 ]; then
+            printf "mute"
+        elif [ "$VOL" -gt 0 ] && [ "$VOL" -le 33 ]; then
+            printf "Vol: %s%%" "$VOL"
+        elif [ "$VOL" -gt 33 ] && [ "$VOL" -le 66 ]; then
+            printf "Vol: %s%%" "$VOL"
+        else
+            printf "Vol: %s%%" "$VOL"
+        fi
+    printf "%s\n" "$SEP2"
+}
+
+print_cmus () {
+    if ps -C cmus > /dev/null; then
+        ARTIST=$(cmus-remote -Q | grep -a '^tag artist' | awk '{gsub("tag artist ", "");print}')
+        TRACK=$(cmus-remote -Q | grep -a '^tag title' | awk '{gsub("tag title ", "");print}')
+        POSITION=$(cmus-remote -Q | grep -a '^position' | awk '{gsub("position ", "");print}')
+        DURATION=$(cmus-remote -Q | grep -a '^duration' | awk '{gsub("duration ", "");print}')
+        STATUS=$(cmus-remote -Q | grep -a '^status' | awk '{gsub("status ", "");print}')
+        SHUFFLE=$(cmus-remote -Q | grep -a '^set shuffle' | awk '{gsub("set shuffle ", "");print}')
+            if [ "$STATUS" = "playing" ]; then
+                STATUS="Play"
+            else
+                STATUS="Pause"
+            fi
+
+            if [ "$SHUFFLE" = "true" ]; then
+                SHUFFLE=" S"
+            else
+                SHUFFLE=""
+            fi
+        printf "%s%s %s - %s " "$SEP1" "$STATUS" "$ARTIST" "$TRACK"
+        printf "%0d:%02d/" $((POSITION%3600/60)) $((POSITION%60))
+        printf "%0d:%02d" $((DURATION%3600/60)) $((DURATION%60))
+        printf "%s%s\n" "$SHUFFLE" "$SEP2"
+    fi
+}
+
+while true
+do
+	xsetroot -name "| $(print_pulse) | $(print_backlight)| Ram: $(print_mem) | Home: $(print_home) | Root: $(print_root) | Temp: $(print_temp) | IP: $(print_wifi) | Bat: $(print_bat) | $(print_date)"
+	sleep 1
+done
